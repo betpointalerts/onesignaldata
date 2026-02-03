@@ -1,7 +1,6 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client with Service Role key
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -11,7 +10,6 @@ const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
 const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY;
 
 async function syncOneSignalIds() {
-  // Fetch users without a OneSignal ID
   const { data: users, error } = await supabase
     .from("users")
     .select("row_id")
@@ -31,23 +29,24 @@ async function syncOneSignalIds() {
 
   for (const user of users) {
     try {
-      const externalId = String(user.row_id); // Ensure type match
+      const externalId = String(user.row_id);
 
-      // OneSignal API endpoint to get player by external_id
-      const res = await fetch(
-        `https://onesignal.com/api/v1/players?app_id=${ONESIGNAL_APP_ID}&external_id=${externalId}`,
-        {
-          headers: {
-            Authorization: `Basic ${ONESIGNAL_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      // Correct POST request to query OneSignal by external_id
+      const res = await fetch(`https://onesignal.com/api/v1/players`, {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${ONESIGNAL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          app_id: ONESIGNAL_APP_ID,
+          external_ids: [externalId],
+        }),
+      });
 
       const json = await res.json();
       console.log(`OneSignal response for ${externalId}:`, json);
 
-      // If a matching user exists, update Supabase
       if (json.players?.length > 0) {
         const oneSignalId = json.players[0].id;
 
@@ -71,3 +70,4 @@ async function syncOneSignalIds() {
 }
 
 syncOneSignalIds();
+
