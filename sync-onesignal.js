@@ -1,6 +1,7 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
+// Initialize Supabase client with Service Role key
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -10,6 +11,7 @@ const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
 const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY;
 
 async function syncOneSignalIds() {
+  // Fetch users without a OneSignal ID
   const { data: users, error } = await supabase
     .from("users")
     .select("row_id")
@@ -29,30 +31,41 @@ async function syncOneSignalIds() {
 
   for (const user of users) {
     try {
+      const externalId = String(user.row_id); // Ensure type match
+
+      // OneSignal API endpoint to get player by external_id
       const res = await fetch(
-        `https://api.onesignal.com/apps/${ONESIGNAL_APP_ID}/users?external_id=${user.row_id}`,
+        `https://onesignal.com/api/v1/players?app_id=${ONESIGNAL_APP_ID}&external_id=${externalId}`,
         {
           headers: {
             Authorization: `Basic ${ONESIGNAL_API_KEY}`,
-            "Content-Type": "application/json"
-          }
+            "Content-Type": "application/json",
+          },
         }
       );
 
       const json = await res.json();
+      console.log(`OneSignal response for ${externalId}:`, json);
 
-      if (json.users?.length) {
-        const oneSignalId = json.users[0].id;
+      // If a matching user exists, update Supabase
+      if (json.players?.length > 0) {
+        const oneSignalId = json.players[0].id;
 
-        await supabase
+        const { error: updateError } = await supabase
           .from("users")
           .update({ one_signal_id: oneSignalId })
           .eq("row_id", user.row_id);
 
-        console.log(`Updated user ${user.row_id}`);
+        if (updateError) {
+          console.error(`Failed to update Supabase for ${user.row_id}:`, updateError);
+        } else {
+          console.log(`Updated user ${user.row_id} with OneSignal ID ${oneSignalId}`);
+        }
+      } else {
+        console.log(`No OneSignal player found for ${externalId}`);
       }
     } catch (err) {
-      console.error(`Failed user ${user.row_id}`, err);
+      console.error(`Error syncing user ${user.row_id}:`, err);
     }
   }
 }
