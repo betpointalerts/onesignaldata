@@ -8,6 +8,7 @@ const supabase = createClient(
 );
 
 const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID; // <-- make sure this is set
 
 async function setEmailInOneSignal() {
   // 1️⃣ Select all users with a row_id
@@ -20,12 +21,12 @@ async function setEmailInOneSignal() {
   if (!users?.length) return console.log("No users to update");
 
   for (const u of users) {
-    const rowId = String(u.row_id);
+    const rowId = String(u.row_id).trim(); // trim spaces
 
     try {
-      // 2️⃣ Get player in OneSignal by external_user_id
+      // 2️⃣ Get player in OneSignal by external_user_id (must include app_id)
       const res = await fetch(
-        `https://onesignal.com/api/v1/players?external_user_id=${rowId}`,
+        `https://onesignal.com/api/v1/players?app_id=${ONESIGNAL_APP_ID}&external_user_id=${encodeURIComponent(rowId)}`,
         {
           headers: {
             Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
@@ -52,7 +53,7 @@ async function setEmailInOneSignal() {
             Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ email: "1" }) // just a test value
+          body: JSON.stringify({ email: "1" }) // test value
         }
       );
 
