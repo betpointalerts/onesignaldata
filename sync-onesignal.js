@@ -1,28 +1,16 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
-// ==========================
-// ENV
-// ==========================
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
-const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY;
+const {
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  ONESIGNAL_APP_ID,
+  ONESIGNAL_API_KEY,
+} = process.env;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !ONESIGNAL_APP_ID || !ONESIGNAL_API_KEY) {
-  throw new Error("Missing required environment variables");
-}
-
-// ==========================
-// CLIENT
-// ==========================
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
 const LIMIT = 300;
 
-// ==========================
-// MAIN
-// ==========================
 async function syncOneSignal() {
   let offset = 0;
   let total = 0;
@@ -38,14 +26,18 @@ async function syncOneSignal() {
       }
     );
 
-    const data = await res.json();
-    if (!data.players || data.players.length === 0) break;
+    const { players } = await res.json();
+    if (!players || players.length === 0) break;
 
-    const rows = data.players
+    const rows = players
       .filter(p => p.external_user_id)
       .map(p => ({
         row_id: String(p.external_user_id),
         onesignal_id: p.id,
+        device_type: p.device_type,
+        platform: p.platform,
+        is_subscribed: p.notification_types === 1,
+        last_active_at: p.last_active,
       }));
 
     // dedupe by row_id
@@ -61,7 +53,7 @@ async function syncOneSignal() {
       .upsert(uniqueRows, { onConflict: ["row_id"] });
 
     if (error) {
-      console.error("Supabase upsert error:", error);
+      console.error("❌ Supabase upsert error:", error);
       return;
     }
 
@@ -73,4 +65,4 @@ async function syncOneSignal() {
   console.log(`✅ Done. Total users upserted: ${total}`);
 }
 
-syncOneSignal().catch(console.error);
+syncOneSignal();
