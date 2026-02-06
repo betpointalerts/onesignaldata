@@ -7,61 +7,73 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
-const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID; // <-- make sure this is set
+const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY; // Must be App REST API Key
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
 
 async function setEmailInOneSignal() {
-  // 1️⃣ Select all users with a row_id
   const { data: users, error } = await supabase
     .from("users")
     .select("row_id")
-    .is("one_signal_id", null); // or all users you want to test
+    .is("one_signal_id", null);
 
   if (error) return console.error(error);
   if (!users?.length) return console.log("No users to update");
 
   for (const u of users) {
-    const rowId = String(u.row_id).trim(); // trim spaces
+    const rowId = String(u.row_id).trim();
 
     try {
-      // 2️⃣ Get player in OneSignal by external_user_id (must include app_id)
+      // Lookup the user via the Users API
       const res = await fetch(
-        `https://onesignal.com/api/v1/players?app_id=${ONESIGNAL_APP_ID}&external_user_id=${encodeURIComponent(rowId)}`,
+        `https://api.onesignal.com/apps/${ONESIGNAL_APP_ID}/users/by/external_id/${encodeURIComponent(rowId)}`,
         {
           headers: {
-            Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+            Authorization: `Key ${ONESIGNAL_API_KEY}`,
             "Content-Type": "application/json",
           },
         }
       );
 
-      const json = await res.json();
-      if (!json.players?.length) {
-        console.log(`No OneSignal player found for row_id=${rowId}`);
+      if (res.status !== 200) {
+        console.log(`No OneSignal user found for row_id=${rowId}`);
         continue;
       }
 
-      const playerId = json.players[0].id;
-      console.log(`Found player ${playerId} for row_id=${rowId}`);
+      const userJson = await res.json();
+      const oneSignalId = userJson.identity?.onesignal_id;
 
-      // 3️⃣ Update the player's email field in OneSignal
-      const updateRes = await fetch(
-        `https://onesignal.com/api/v1/players/${playerId}`,
+      if (!oneSignalId) {
+        console.log(`User found but no OneSignal ID for row_id=${rowId}`);
+        continue;
+      }
+
+      console.log(`Found OneSignal user ID=${oneSignalId} for row_id=${rowId}`);
+
+      // Optional: update email in OneSignal (user identity level)
+      await fetch(
+        `https://api.onesignal.com/apps/${ONESIGNAL_APP_ID}/users/by/external_id/${encodeURIComponent(rowId)}`,
         {
           method: "PUT",
           headers: {
-            Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+            Authorization: `Key ${ONESIGNAL_API_KEY}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ email: "1" }) // test value
+          body: JSON.stringify({
+            identity: { email: "1" }
+          }),
         }
       );
 
-      const updateJson = await updateRes.json();
-      console.log(`Updated OneSignal player:`, updateJson);
+      console.log(`Updated OneSignal user email for row_id=${rowId}`);
+
+      // Update `users.one_signal_id` in Supabase
+      await supabase
+        .from("users")
+        .update({ one_signal_id: oneSignalId })
+        .eq("row_id", rowId);
 
     } catch (err) {
-      console.error(`Error updating row_id=${rowId}:`, err);
+      console.error(`Error processing row_id=${rowId}:`, err);
     }
   }
 }
