@@ -30,17 +30,16 @@ async function syncOneSignal() {
     if (!players || players.length === 0) break;
 
     const rows = players
-      .filter(p => p.external_user_id)
+      .filter(p => p.external_user_id && p.id)
       .map(p => ({
         row_id: String(p.external_user_id),
-        onesignal_id: p.id,
+        player_id: p.id,
         device_type: p.device_type,
         platform: p.platform,
         is_subscribed: p.notification_types === 1,
         last_active_at: p.last_active,
       }));
 
-    // dedupe by row_id
     const uniqueRows = Object.values(
       rows.reduce((acc, r) => {
         acc[r.row_id] = r;
@@ -58,7 +57,6 @@ async function syncOneSignal() {
     }
 
     total += uniqueRows.length;
-    console.log(`Imported ${uniqueRows.length} users (offset=${offset})`);
     offset += LIMIT;
   }
 
