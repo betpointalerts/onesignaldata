@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client
+// Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -9,31 +9,21 @@ const supabase = createClient(
 
 const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
 
-async function syncOneSignalIds() {
-  // 1️⃣ Select all users without one_signal_id
+async function setEmailInOneSignal() {
+  // 1️⃣ Select all users with a row_id
   const { data: users, error } = await supabase
     .from("users")
     .select("row_id")
-    .is("one_signal_id", null);
+    .is("one_signal_id", null); // or all users you want to test
 
-  if (error) {
-    console.error("Supabase error:", error);
-    return;
-  }
+  if (error) return console.error(error);
+  if (!users?.length) return console.log("No users to update");
 
-  if (!users?.length) {
-    console.log("No users to sync");
-    return;
-  }
-
-  console.log(`Syncing ${users.length} users`);
-
-  // 2️⃣ Loop through each user
   for (const u of users) {
-    const rowId = String(u.row_id); // convert to string for OneSignal
+    const rowId = String(u.row_id);
 
     try {
-      // 2a️⃣ Fetch player info from OneSignal by external_user_id
+      // 2️⃣ Get player in OneSignal by external_user_id
       const res = await fetch(
         `https://onesignal.com/api/v1/players?external_user_id=${rowId}`,
         {
@@ -45,30 +35,34 @@ async function syncOneSignalIds() {
       );
 
       const json = await res.json();
-
-      if (!json.players || json.players.length === 0) {
+      if (!json.players?.length) {
         console.log(`No OneSignal player found for row_id=${rowId}`);
         continue;
       }
 
       const playerId = json.players[0].id;
-      console.log(`Found player_id=${playerId} for row_id=${rowId}`);
+      console.log(`Found player ${playerId} for row_id=${rowId}`);
 
-      // 2b️⃣ Update users table with player_id
-      const { error: updateError } = await supabase
-        .from("users")
-        .update({ one_signal_id: playerId })
-        .eq("row_id", u.row_id); // match original type
+      // 3️⃣ Update the player's email field in OneSignal
+      const updateRes = await fetch(
+        `https://onesignal.com/api/v1/players/${playerId}`,
+        {
+          method: "PUT",
+          headers: {
+            Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ email: "1" }) // just a test value
+        }
+      );
 
-      if (updateError) {
-        console.error(`Failed to update row_id=${rowId}:`, updateError);
-      } else {
-        console.log(`Updated row_id=${rowId} with one_signal_id=${playerId}`);
-      }
+      const updateJson = await updateRes.json();
+      console.log(`Updated OneSignal player:`, updateJson);
+
     } catch (err) {
-      console.error(`Error processing row_id=${rowId}:`, err);
+      console.error(`Error updating row_id=${rowId}:`, err);
     }
   }
 }
 
-syncOneSignalIds();
+setEmailInOneSignal();
