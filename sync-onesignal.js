@@ -14,14 +14,14 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !ONESIGNAL_APP_ID || !ONESIGN
 }
 
 // ==========================
-// CLIENTS
+// CLIENT
 // ==========================
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 // ==========================
 // CONFIG
 // ==========================
-const LIMIT = 300; // OneSignal max per page
+const LIMIT = 300;
 
 // ==========================
 // MAIN
@@ -45,22 +45,21 @@ async function syncOneSignal() {
     if (!json.players || json.players.length === 0) break;
 
     // ==========================
-    // MAP PLAYERS → ROWS
+    // MAP → ROWS
     // ==========================
     const rows = json.players
-      .filter(p => p.external_user_id) // must have external ID
+      .filter(p => p.external_user_id)
       .map(p => ({
-        row_id: String(p.external_user_id), // 🔑 YOUR USER ID
+        row_id: String(p.external_user_id), // your user id
         onesignal_id: p.id,
         device_type: p.device_type,
         platform: p.platform,
         is_subscribed: p.notification_types === 1,
         last_active_at: p.last_active,
-        created_at: new Date().toISOString(),
       }));
 
     // ==========================
-    // DEDUPE BY row_id
+    // DEDUPE (row_id)
     // ==========================
     const uniqueRows = Object.values(
       rows.reduce((acc, row) => {
