@@ -1,81 +1,64 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
-// Supabase client
+// Initialize Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY; // Must be App REST API Key
-const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
+const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
+const APP_ID = process.env.ONESIGNAL_APP_ID; // your OneSignal app ID
+const PAGE_SIZE = 300; // OneSignal max per request
 
-async function setEmailInOneSignal() {
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("row_id")
-    .is("one_signal_id", null);
+async function fetchAllPlayers() {
+  let offset = 0;
+  let totalFetched = 0;
 
-  if (error) return console.error(error);
-  if (!users?.length) return console.log("No users to update");
-
-  for (const u of users) {
-    const rowId = String(u.row_id).trim();
-
-    try {
-      // Lookup the user via the Users API
-      const res = await fetch(
-        `https://api.onesignal.com/apps/${ONESIGNAL_APP_ID}/users/by/external_id/${encodeURIComponent(rowId)}`,
-        {
-          headers: {
-            Authorization: `Key ${ONESIGNAL_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      if (res.status !== 200) {
-        console.log(`No OneSignal user found for row_id=${rowId}`);
-        continue;
+  while (true) {
+    const res = await fetch(
+      `https://onesignal.com/api/v1/players?app_id=${APP_ID}&limit=${PAGE_SIZE}&offset=${offset}`,
+      {
+        headers: {
+          Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+          "Content-Type": "application/json",
+        },
       }
+    );
 
-      const userJson = await res.json();
-      const oneSignalId = userJson.identity?.onesignal_id;
+    const json = await res.json();
+    if (!json.players?.length) break;
 
-      if (!oneSignalId) {
-        console.log(`User found but no OneSignal ID for row_id=${rowId}`);
-        continue;
-      }
+    console.log(`Fetched ${json.players.length} players (offset=${offset})`);
 
-      console.log(`Found OneSignal user ID=${oneSignalId} for row_id=${rowId}`);
+    // Upsert into Supabase
+    const rows = json.players.map((p) => ({
+      row_id: p.external_user_id,
+      player_id: p.id,
+      email: p.identifier || null,
+      device_type: p.device_type,
+      last_active: p.last_active ? new Date(p.last_active * 1000).toISOString() : null,
+      session_count: p.session_count || 0,
+      tags: p.tags || {},
+      language: p.language || null,
+      notification_types: p.notification_types || 0,
+    }));
 
-      // Optional: update email in OneSignal (user identity level)
-      await fetch(
-        `https://api.onesignal.com/apps/${ONESIGNAL_APP_ID}/users/by/external_id/${encodeURIComponent(rowId)}`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Key ${ONESIGNAL_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            identity: { email: "1" }
-          }),
-        }
-      );
+    const { error } = await supabase
+      .from("onesignal_users")
+      .upsert(rows, { onConflict: ["row_id"] });
 
-      console.log(`Updated OneSignal user email for row_id=${rowId}`);
-
-      // Update `users.one_signal_id` in Supabase
-      await supabase
-        .from("users")
-        .update({ one_signal_id: oneSignalId })
-        .eq("row_id", rowId);
-
-    } catch (err) {
-      console.error(`Error processing row_id=${rowId}:`, err);
+    if (error) {
+      console.error("Supabase upsert error:", error);
+    } else {
+      totalFetched += rows.length;
     }
+
+    if (json.players.length < PAGE_SIZE) break; // last page
+    offset += PAGE_SIZE;
   }
+
+  console.log(`✅ Done. Total users upserted: ${totalFetched}`);
 }
 
-setEmailInOneSignal();
+fetchAllPlayers().catch(console.error);
