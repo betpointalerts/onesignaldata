@@ -1,55 +1,44 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
+// Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const APP_ID = process.env.ONESIGNAL_APP_ID;
-const REST_KEY = process.env.ONESIGNAL_API_KEY;
-const PAGE_SIZE = 300;
+const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID; // <-- make sure this is set
 
-async function fetchAllPlayers() {
-  let offset = 0;
-  let total = 0;
+async function setEmailInOneSignal() {
+  // 1️⃣ Select all users with a row_id
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("row_id")
+    .is("one_signal_id", null); // or all users you want to test
 
-  while (true) {
-    const res = await fetch(`https://onesignal.com/api/v1/players?app_id=${APP_ID}&limit=${PAGE_SIZE}&offset=${offset}`, {
-      headers: {
-        Authorization: `Basic ${REST_KEY}`,
-        "Content-Type": "application/json",
-      },
-    });
+  if (error) return console.error(error);
+  if (!users?.length) return console.log("No users to update");
 
-    const json = await res.json();
+  for (const u of users) {
+    const rowId = String(u.row_id).trim(); // trim spaces
 
-    if (!json.players || json.players.length === 0) break;
+    try {
+      // 2️⃣ Get player in OneSignal by external_user_id (must include app_id)
+      const res = await fetch(
+        `https://onesignal.com/api/v1/players?app_id=${ONESIGNAL_APP_ID}&external_user_id=${encodeURIComponent(rowId)}`,
+        {
+          headers: {
+            Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-    const rows = json.players.map((p) => ({
-      row_id: p.external_user_id,
-      player_id: p.id,
-      device_type: p.device_type,
-      email: p.identifier || null,
-      last_active: p.last_active ? new Date(p.last_active * 1000).toISOString() : null,
-      session_count: p.session_count || 0,
-      language: p.language || null,
-      tags: p.tags || {},
-      notification_types: p.notification_types || 0,
-    }));
+      const json = await res.json();
+      if (!json.players?.length) {
+        console.log(`No OneSignal player found for row_id=${rowId}`);
+        continue;
+      }
 
-    // Upsert into Supabase
-    const { error } = await supabase.from("onesignal_users").upsert(rows, { onConflict: ["row_id"] });
-    if (error) console.error("Supabase upsert error:", error);
-
-    total += rows.length;
-    console.log(`Imported ${rows.length} players (offset=${offset})`);
-
-    if (json.players.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
-  }
-
-  console.log(`✅ Done. Total users upserted: ${total}`);
-}
-
-fetchAllPlayers().catch(console.error);
+      const playerId = json.players[0].i
