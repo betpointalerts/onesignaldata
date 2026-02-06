@@ -32,12 +32,11 @@ async function syncOneSignal() {
     const rows = players
       .filter(p => p.external_user_id && p.id)
       .map(p => ({
-        row_id: String(p.external_user_id),
-        player_id: p.id,
+        row_id: String(p.external_user_id), // your internal user id
+        player_id: p.id,                    // ✅ OneSignal PLAYER ID
         device_type: p.device_type,
         platform: p.platform,
-        is_subscribed: p.notification_types === 1,
-        last_active_at: p.last_active,
+        last_active_at: p.last_active,       // epoch seconds
       }));
 
     const uniqueRows = Object.values(
