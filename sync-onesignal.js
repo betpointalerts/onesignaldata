@@ -1,14 +1,14 @@
 import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
-// Initialize Supabase client with Service Role key
+// Supabase client with Service Role
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID;
-const ONESIGNAL_API_KEY = process.env.ONESIGNAL_API_KEY;
+const ONESIGNAL_REST_KEY = process.env.ONESIGNAL_REST_KEY;
 
 async function syncOneSignalIds() {
   // 1️⃣ Fetch all users without one_signal_id
@@ -29,52 +29,45 @@ async function syncOneSignalIds() {
 
   console.log(`Syncing ${users.length} users`);
 
-  // 2️⃣ Convert all row_ids to strings for OneSignal
-  const externalIds = users.map(u => String(u.row_id));
+  // 2️⃣ Loop through each row_id and fetch player
+  for (const u of users) {
+    const rowId = String(u.row_id);
 
-  try {
-    // 3️⃣ Make POST request to OneSignal for all external_ids at once
-    const res = await fetch("https://onesignal.com/api/v1/players", {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${ONESIGNAL_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        app_id: ONESIGNAL_APP_ID,
-        external_ids: externalIds,
-      }),
-    });
+    try {
+      const res = await fetch(
+        `https://onesignal.com/api/v1/players?external_user_id=${rowId}`,
+        {
+          headers: {
+            Authorization: `Basic ${ONESIGNAL_REST_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
-    const json = await res.json();
+      const json = await res.json();
 
-    if (!json.players?.length) {
-      console.log("No OneSignal players found for these users");
-      return;
-    }
+      if (!json.players || !json.players.length) {
+        console.log(`No OneSignal player found for ${rowId}`);
+        continue;
+      }
 
-    console.log(`Received ${json.players.length} players from OneSignal`);
+      const playerId = json.players[0].id;
 
-    // 4️⃣ Update Supabase for each user found
-    for (const player of json.players) {
-      const oneSignalId = player.id;
-      const externalId = player.external_id;
-
+      // 3️⃣ Upsert player_id into Supabase
       const { error: updateError } = await supabase
         .from("users")
-        .update({ one_signal_id: oneSignalId })
-        .eq("row_id", externalId);
+        .update({ one_signal_id: playerId })
+        .eq("row_id", rowId);
 
       if (updateError) {
-        console.error(`Failed to update Supabase for ${externalId}:`, updateError);
+        console.error(`Failed to update ${rowId}:`, updateError);
       } else {
-        console.log(`Updated user ${externalId} with OneSignal ID ${oneSignalId}`);
+        console.log(`Updated ${rowId} with OneSignal ID ${playerId}`);
       }
+    } catch (err) {
+      console.error(`Error fetching OneSignal player for ${rowId}:`, err);
     }
-  } catch (err) {
-    console.error("Error syncing OneSignal users:", err);
   }
 }
 
 syncOneSignalIds();
-
