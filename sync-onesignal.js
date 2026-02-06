@@ -11,9 +11,9 @@ const {
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const LIMIT = 300;
 
-async function syncOneSignal() {
+async function syncOneSignalUsers() {
   let offset = 0;
-  let total = 0;
+  let totalUpserted = 0;
 
   while (true) {
     const res = await fetch(
@@ -26,18 +26,20 @@ async function syncOneSignal() {
       }
     );
 
-    const { players } = await res.json();
-    if (!players || players.length === 0) break;
+    const data = await res.json();
 
-    const rows = players
+    if (!data.players || data.players.length === 0) break;
+
+    // Map OneSignal User ID
+    const rows = data.players
       .filter(p => p.external_user_id && p.id)
       .map(p => ({
         row_id: String(p.external_user_id), // your internal user id
-        player_id: p.id,                    // ✅ OneSignal PLAYER ID
+        onesignal_user_id: p.id,           // ✅ OneSignal User ID
         device_type: p.device_type,
         platform: p.platform,
         is_subscribed: p.notification_types === 1,
-        last_active_at: p.last_active,       // epoch seconds
+        last_active_at: p.last_active,
       }));
 
     const uniqueRows = Object.values(
@@ -56,11 +58,11 @@ async function syncOneSignal() {
       return;
     }
 
-    total += uniqueRows.length;
+    totalUpserted += uniqueRows.length;
     offset += LIMIT;
   }
 
-  console.log(`✅ Done. Total users upserted: ${total}`);
+  console.log(`✅ Sync complete. Total users upserted: ${totalUpserted}`);
 }
 
-syncOneSignal();
+syncOneSignalUsers().catch(console.error);
